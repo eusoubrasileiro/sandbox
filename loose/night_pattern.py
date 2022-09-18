@@ -3,6 +3,12 @@ import numpy as np
 import datetime 
 from matplotlib import pylab as plt
 import datetime
+import pandas as pd
+import numpy as np
+import datetime 
+import os, datetime
+import sqlite3
+import subprocess
 
 
 def plot_nights(df, body_pixels, cam_name='frontwall', verbose=False, nnights=1,
@@ -26,49 +32,41 @@ def plot_nights(df, body_pixels, cam_name='frontwall', verbose=False, nnights=1,
     df = df[['nchange_pixels', 'span']]
     if verbose:
         plt.figure()
-        df.span.apply(lambda x: x/60.).hist(bins=40)
-    
+        df.span.apply(lambda x: x/60.).hist(bins=40)    
     resample = 3 # resample factor
     dfp = df.resample(f'{resample}T').sum() # resample 3 min, summing where there was no data it uses 0        
-    dance_pixels = 2*body_pixels
-    #dfp['nchange_pixels'] += 1 # to avoid log of 0
-    dfp['nchange_pixels'] = 100*dfp['nchange_pixels']/dance_pixels # just nromalize by max movment    
-    date = dfp.index[0] # only for sorted datetimes
-    hour = dfp.index[0].time().hour 
-    if hour < 18: # correction for start data only after 0:00
-        date = date-pd.Timedelta(days=1)
-    date = date.date()
+    dfp['nchange_pixels'] = 100*dfp['nchange_pixels']/body_pixels # just nomalize by max movement    
+    # setting unique night identifier as date of start of the night
+    # def get_night(datetime_):
+    #     pass 
     dfp['night'] = np.nan  # which sleep night are we in
-    for index, row in dfp.iterrows():
-        cdate = index.date()
-        chour = index.time().hour
-        if cdate == date and chour > 18: # same night 
-            dfp.at[index, 'night'] = date
-        elif cdate == date+pd.Timedelta(days=1) and chour < 8:  # next morning
-            dfp.at[index, 'night'] =  date  
-        else:
-            date = cdate 
-            dfp.at[index, 'night'] =  date      
+    pday = None # start day date 
+    for index in dfp.index:
+        cday, chour = index.date(), index.time().hour
+        if pday is None: # get start day date
+            # correction for start day date only after 0:00
+            pday = cday if chour > 18 else cday-pd.Timedelta(days=1)
+            continue 
+        if cday == pday+pd.Timedelta(days=1) and chour >= 12:  # next day morning ended
+            pday = cday # starting new day
+        dfp.at[index, 'night'] =  pday              
     if verbose: # stair-step night code plot
         plt.figure()
         dfp['night'].map(lambda x: int(x.month*100 + x.day)).plot()
     nights =  []    
-    msgs = [] 
-    nights_info = []
-    # from 20:00 to 6:00 are 10 hours - 
-    nsamples = (60//resample)*10 # number of samples per night 
+    nights_info = []     
+    night_start_hour = 20 
+    night_end_hour = 6 # from 20:00 to 6:00 are 10 hours -
+    nsamples = (60//resample)*(24-night_start_hour+night_end_hour) # number of samples per night 
     for night, dfnight in dfp.groupby(dfp.night)['nchange_pixels']:     
-        night_data = dfnight[ ( (dfnight.index.time >= datetime.time(hour=20)) & (dfnight.index.time < datetime.time(hour=23, minute=59, second=59)) ) | 
-            ( (dfnight.index.time > datetime.time(hour=0)) & (dfnight.index.time <= datetime.time(hour=6)) ) ]
+        night_data = dfnight[ ( (dfnight.index.time >= datetime.time(hour=night_start_hour)) & (dfnight.index.time < datetime.time(hour=23, minute=59, second=59)) ) | 
+            ( (dfnight.index.time > datetime.time(hour=0)) & (dfnight.index.time <= datetime.time(hour=night_end_hour)) ) ]
         if len(night_data) != nsamples:
             print(f"ignored night data { night } len {len(night_data)}")
             continue 
         nights.append(night_data)
         nights_info.append([night.strftime("%m/%d"), night_data.index.time[0], night_data.index.time[-1], 
             np.sum(night_data.values), np.count_nonzero(night_data.values), night_data.size])
-        msgs.append(f"day {nights_info[-1][0]} time {nights_info[-1][1]} {nights_info[-1][2]} sum_movs {nights_info[-1][3]:5.1f} event count {nights_info[-1][4]:3d} {nights_info[-1][5]}")
-        if verbose:
-            print(msgs[-1])    
     # plot number of last nights defined    
     ngraphs = nnights+1 if stacking else nnights    
     fig, axis = plt.subplots(ngraphs,1,figsize=(15,4*ngraphs)) 
@@ -135,3 +133,27 @@ def plot_nights(df, body_pixels, cam_name='frontwall', verbose=False, nnights=1,
 # ax2.set_ylabel('Y2 data', color='b')
 
 # plt.show()
+
+if __name__ == "__main__":
+    dbpath = '/media/andre/Data/Downloads/motion.db'
+    if os.path.exists(dbpath):
+        os.remove(dbpath)    
+    os.chdir(os.path.dirname(dbpath))
+    _ = subprocess.run("wget ipcam.home/motion.db", shell=True,  check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Create your connection.
+    cnx = sqlite3.connect('/media/andre/Data/Downloads/motion.db')
+    df = pd.read_sql_query("SELECT * FROM events", cnx)
+    df.dropna(inplace=True)
+    df['span'] = (df.stop - df.start).astype(np.int32)
+    from_utc_timestamp = lambda dts: pd.to_datetime(dts-10800, unit='s')# convert from utc to zone BR/SP -3:00
+    df['start'] = from_utc_timestamp(df['start'])
+    df['stop'] = from_utc_timestamp(df['stop'])
+    df.set_index('start',inplace=True)
+    df.sort_index(inplace=True)
+    df['tstart'] = df.index.map(lambda x: int(x.timestamp())) # timestamp start 
+    df.drop(['row_id', 'mfile', 'pfile', 'cam'], axis=1, inplace=True)
+    # child sleep select - body_pixels (2nd argument) should be calibrated everytime the camera is repositioned
+    plot_nights(df, 4e3, 'frontwall', nnights=7, stacking='selected', addtext="Daniel") 
+    plot_nights(df, 30e3, 'street', nnights=3, stacking='all', addtext="Street") 
+    plot_nights(df, 2.5e3, 'new', nnights=5, stacking='selected', addtext="Sarah") 
+    plt.show()
