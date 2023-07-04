@@ -1,38 +1,27 @@
-import time, re, subprocess
+"""
+Uses TEMPer2 sensor from https://pcsensor.com/manuals-detail?article_id=474 
+to monitor temperature at our house. Writes on a database sqlite internal 
+(sensor temperature) and external temperature (probe on the end of black wire)
+"""
 
-#def log_print(*args, **kwargs):
-#    with lock:
-#        print(time.strftime("%Y-%m-%d %H:%M:%S")," ".join(map(str,args)), file=log_file,**kwargs)
-#        if kwargs.get('print_stdout', True):    # by default don't print on stdout - since inside tmux and log-file already exists    
-#            print(time.strftime("%Y-%m-%d %H:%M:%S")," ".join(map(str,args)),**kwargs)
+import pandas as pd 
+import subprocess 
+import time
+from datetime import datetime
+import sqlite3
 
-# import logging
+# in case no permissions
+#sudo chmod o+rw /dev/hidraw4
 
-# logging.basicConfig(
-#     level=logging.INFO,
-#     datefmt='%m/%d/%Y %I:%M:%S '
-#     format='%(asctime)s %(message)s',
-#     handlers=[
-#         logging.FileHandler("core_temps.txt"),
-#         logging.StreamHandler()
-#     ]
-# )
+dbfile = '/home/andre/Projects/sandbox/loose/home_temperature.db'
+temperpy_exec = '/home/andre/Projects/temper/temper.py'
 
-# logprint = logging.info
-
-if __name__ == "__main__":
-    while(True):
-      try:      
-        sensors = subprocess.check_output(['sensors']).decode()
-        sensors = re.findall('([\+]*\d{1,3}\.\d+).+C', sensors)
-        c0temp, c1temp = sensors
-        # cpu use to correlate info
-        mpstat = subprocess.check_output(['mpstat', '1', '5']).decode() # average 5 measures
-        cpuuse = float(mpstat.split('\n')[-2].split(' ')[8].replace(',','.'))
-        print(time.strftime("%Y-%m-%d %H:%M:%S")+" "+" ".join(map(str,[c0temp, c1temp, cpuuse])))
-        with open('core_temps.txt', 'a') as file:
-            file.write(time.strftime("%Y-%m-%d %H:%M:%S")+" "+" ".join(map(str,[c0temp, c1temp, cpuuse]))+"\n")
-        time.sleep(10*60)
-      except Exception as exc:
-          print("Exception: ", exc)
-
+while True:
+    res = subprocess.run(temperpy_exec, shell=True,  check=True, capture_output=True)
+    temp_in, temp_out = res.stdout.decode().split(' ')[-6][:-1], res.stdout.decode().split(' ')[-3][:-1]
+    now = datetime.now()
+    with sqlite3.connect(dbfile) as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"INSERT INTO home (time, temp_out, temp_in) VALUES (?, ?, ?)", (datetime.now(), float(temp_out), float(temp_in)))
+        conn.commit()    
+    time.sleep(60*5) # every 5 minutes
