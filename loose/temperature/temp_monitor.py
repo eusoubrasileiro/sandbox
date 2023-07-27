@@ -21,9 +21,9 @@ dbfile = '/home/andre/home_temperature.db'
 temperpy_exec = '/home/andre/temper/temper.py'
 
 while True:    
-    cmd = '/home/andre/miniforge-pypy3/bin/python3 /home/andre/temper/temper.py'.split()
+    cmd = f"/home/andre/miniforge-pypy3/bin/python3 {temperpy_exec}".split()
     res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True) 
-    temp_in, temp_out = res.stdout.decode().split(' ')[-6][:-1], res.stdout.decode().split(' ')[-3][:-1]
+    temp_in, temp_out = res.stdout.split()[-6][:-1], res.stdout.split()[-3][:-1]
     now = datetime.now()
     with sqlite3.connect(dbfile) as conn:
         cursor = conn.cursor()
