@@ -4,6 +4,8 @@ to monitor temperature at our house. Writes on a database sqlite internal
 (sensor temperature) and external temperature (probe on the end of black wire)
 
 Uses https://github.com/ccwienk/temper.git
+
+for jetson-nano or other arm use https://conda-forge.org/miniforge/
 """
 
 import pandas as pd 
@@ -18,8 +20,9 @@ import sqlite3
 dbfile = '/home/andre/home_temperature.db'
 temperpy_exec = '/home/andre/temper/temper.py'
 
-while True:
-    res = subprocess.run(temperpy_exec, shell=True,  check=True, capture_output=True)
+while True:    
+    cmd = '/home/andre/miniforge-pypy3/bin/python3 /home/andre/temper/temper.py'.split()
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True) 
     temp_in, temp_out = res.stdout.decode().split(' ')[-6][:-1], res.stdout.decode().split(' ')[-3][:-1]
     now = datetime.now()
     with sqlite3.connect(dbfile) as conn:
