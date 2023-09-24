@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 Restart=always
 RestartSec=5
-User=root
-ExecStart=/home/andre/miniforge-pypy3/bin/python3 /home/andre/temper/temp_monitor.py
+User=andre
+ExecStart=/usr/bin/python3 /home/andre/temper/temp_monitor.py
 
 [Install]
 WantedBy=multi-user.target
